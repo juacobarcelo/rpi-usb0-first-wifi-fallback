@@ -31,7 +31,8 @@ It includes two scripts:
 
 ## Prerequisites
 
-* **Raspberry Pi Zero 2 W** running Raspberry Pi OS Bookworm (uses NetworkManager by default), **already operational and reachable over Wi‑Fi** (e.g., SSH over WLAN works).
+* **Raspberry Pi Zero 2 W** running Raspberry Pi OS Bookworm (uses NetworkManager by default), **already operational and reachable over Wi‑Fi**.
+* You can already connect to the Pi from the Windows host over Wi‑Fi (SSH or similar) before starting this guide.
 * **Windows 10/11** PC with an active Internet connection (Ethernet or Wi‑Fi).
 * **USB data cable** (micro‑USB *data*, not power‑only) connected to the Pi’s **USB** port (not the PWR IN).
 * If Windows doesn’t auto‑install the RNDIS driver, install a **Remote NDIS Compatible Device** driver. One option used successfully: [https://github.com/dukelec/mbrush/tree/master/doc/win_driver](https://github.com/dukelec/mbrush/tree/master/doc/win_driver).
