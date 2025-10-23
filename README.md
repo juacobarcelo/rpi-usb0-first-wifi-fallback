@@ -109,6 +109,22 @@ ip link show usb0
 
 * Use the script below [`setup-usb-priority.sh`](#setup-usb-prioritysh-raspberry-pi) (sets `usb0` to DHCP with metric 100 and Wi‑Fi profile `preconfigured` to metric 600), or run equivalent `nmcli` commands manually.
 
+If you want to inspect or manually bring the connection up on the Pi:
+
+```bash
+# List saved connections (all / active)
+nmcli connection show
+nmcli connection show --active
+
+# Show device state and controllers
+nmcli device status
+
+# Bring usb0 online through NetworkManager
+sudo nmcli connection up usb0
+```
+
+The helper script also writes `/etc/NetworkManager/conf.d/98-usb0-managed.conf` so the gadget stays managed after reboots. If `nmcli device status` still lists `usb0` as `unmanaged`, check `/etc/NetworkManager/conf.d/*.conf` for `unmanaged-devices=interface-name:usb0` entries and remove them.
+
 ---
 
 ## Verification
