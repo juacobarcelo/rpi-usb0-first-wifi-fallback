@@ -38,6 +38,9 @@ WIFI_CONN_NAME="preconfigured"   # change if your Wi‑Fi profile has a differen
 USB_METRIC=100                   # higher priority (lower number)
 WIFI_METRIC=600                  # fallback
 
+NM_CONF_DIR="/etc/NetworkManager/conf.d"
+USB_MANAGED_CONF="$NM_CONF_DIR/98-usb0-managed.conf"
+
 echo "==> Ensuring USB gadget overlays (dwc2 + g_ether) ..."
 CFG="/boot/firmware/config.txt"
 CMD="/boot/firmware/cmdline.txt"
@@ -57,26 +60,45 @@ fi
 echo "==> Let NetworkManager manage $USB_IF ..."
 sudo nmcli device set "$USB_IF" managed yes || true
 
+echo "==> Making $USB_IF managed persistently ..."
+sudo install -d -m 755 "$NM_CONF_DIR"
+sudo tee "$USB_MANAGED_CONF" >/dev/null <<EOF
+[device]
+match-device=interface-name:${USB_IF}
+managed=1
+EOF
+if grep -REq "unmanaged-devices=.*interface-name:${USB_IF}" "$NM_CONF_DIR" 2>/dev/null; then
+  offenders=$(grep -Rl "unmanaged-devices=.*interface-name:${USB_IF}" "$NM_CONF_DIR" 2>/dev/null | paste -sd ', ' -)
+  echo "   -> Warning: ${USB_IF} is still marked unmanaged in: ${offenders}"
+  echo "      Remove or adjust those entries if the device stays unmanaged after reboot."
+fi
+
 echo "==> Normalize duplicate connections named $USB_CONN_NAME ..."
-ACTIVE_UUID="$(nmcli -t -f NAME,UUID,TYPE,DEVICE con show --active | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3=="ethernet"{print $2; exit}')"
+ACTIVE_UUID="$(nmcli -t -f NAME,UUID,TYPE,DEVICE con show --active | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3 ~ /ethernet/{print $2; exit}')"
 if [ -n "$ACTIVE_UUID" ]; then
   # delete any inactive duplicates
-  while read -r NAME UUID TYPE DEV STATE; do
-    if [ "$NAME" = "$USB_CONN_NAME" ] && [ "$TYPE" = "ethernet" ] && [ "$UUID" != "$ACTIVE_UUID" ]; then
+  while IFS=: read -r NAME UUID TYPE DEV STATE; do
+    if [ "$NAME" = "$USB_CONN_NAME" ] && [[ "$TYPE" =~ ethernet ]] && [ "$UUID" != "$ACTIVE_UUID" ]; then
       sudo nmcli con delete "$UUID" || true
       echo "   -> Deleted duplicate $UUID"
     fi
-  done < <(nmcli -f NAME,UUID,TYPE,DEVICE,STATE con show | tail -n +2)
+  done < <(nmcli -t -f NAME,UUID,TYPE,DEVICE,STATE con show)
 else
   # no active usb0 profile yet
-  CAND_UUID="$(nmcli -t -f NAME,UUID,TYPE con show | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3=="ethernet"{print $2; exit}')"
+  CAND_UUID="$(nmcli -t -f NAME,UUID,TYPE con show | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3 ~ /ethernet/{print $2; exit}')"
   if [ -n "$CAND_UUID" ]; then
     ACTIVE_UUID="$CAND_UUID"
   else
     echo "   -> Creating connection $USB_CONN_NAME..."
     sudo nmcli con add type ethernet ifname "$USB_IF" con-name "$USB_CONN_NAME" || true
-    ACTIVE_UUID="$(nmcli -t -f NAME,UUID,TYPE con show | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3=="ethernet"{print $2; exit}')"
+    ACTIVE_UUID="$(nmcli -t -f NAME,UUID,TYPE con show | awk -F: -v n="$USB_CONN_NAME" '$1==n && $3 ~ /ethernet/{print $2; exit}')"
   fi
+fi
+
+if [ -z "$ACTIVE_UUID" ]; then
+  echo "❌ Error: unable to determine UUID for connection '$USB_CONN_NAME'."
+  echo "   -> Inspect existing connections with: nmcli -t -f NAME,UUID,TYPE con show"
+  exit 1
 fi
 
 echo "==> Configure $USB_CONN_NAME ($ACTIVE_UUID) for DHCP and priority ..."
@@ -85,10 +107,18 @@ sudo nmcli con modify "$ACTIVE_UUID" \
   connection.interface-name "$USB_IF" \
   connection.autoconnect yes \
   connection.autoconnect-priority 100 \
+  802-3-ethernet.mac-address "" \
+  802-3-ethernet.cloned-mac-address "" \
   ipv4.method auto \
   ipv4.never-default no \
   ipv4.route-metric "$USB_METRIC" \
   ipv6.method ignore
+
+# NetworkManager caches the permanent MAC; when gadget randomizes each boot,
+# clear any stale reference so activation does not fail on mismatch.
+if nmcli --help 2>&1 | grep -q 'assigned-mac-address'; then
+  sudo nmcli con modify "$ACTIVE_UUID" 802-3-ethernet.assigned-mac-address "" || true
+fi
 
 echo "==> Configure Wi‑Fi ($WIFI_CONN_NAME) as fallback (metric $WIFI_METRIC) ..."
 if nmcli -t -f NAME con show | grep -qx "$WIFI_CONN_NAME"; then
